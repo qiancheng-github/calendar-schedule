@@ -1,0 +1,30 @@
+# 依赖（体积大、可 npm install 恢复）
+node_modules/
+
+# 构建产物（可重新 build）
+dist/
+unpackage/
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# 环境变量（勿提交密钥）
+.env
+.env.*
+!.env.example
+
+# 编辑器（按需：若团队要统一配置可删掉下面两行）
+.idea/
+.vscode/
+
+# 测试覆盖率
+coverage/
+
+# uni-app / HBuilderX 常见本地目录
+.hbuilderx/
+
+# 本地 npm pack / 离线包，勿提交（依赖以 package.json + lock 为准）
+*.tgz
