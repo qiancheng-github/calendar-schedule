@@ -20,6 +20,18 @@ const thisSaturdayIsBigWeek = computed(() =>
 // 班次选项
 const shiftTypes = ['早班', '中班', '晚班', '休息', '上班']
 
+/** 微信小程序 WXSS 不支持中文 class 选择器；展示仍用中文 shift */
+function shiftTypeClass(shift: string) {
+  const m: Record<string, string> = {
+    早班: 'shift-morning',
+    中班: 'shift-afternoon',
+    晚班: 'shift-night',
+    休息: 'shift-rest',
+    上班: 'shift-work'
+  }
+  return m[shift] || ''
+}
+
 // 新规则
 const showRuleModal = ref(false)
 const ruleEmployeeId = ref('')
@@ -240,7 +252,7 @@ function toggleRestDay(day: number) {
               v-for="(shift, index) in rule.shiftPattern"
               :key="index"
               class="pattern-item"
-              :class="shift"
+              :class="shiftTypeClass(shift)"
             >
               {{ shift }}
             </view>
@@ -309,7 +321,7 @@ function toggleRestDay(day: number) {
               @click="togglePatternShift(index)"
             >
               <text class="slot-index">{{ index + 1 }}</text>
-              <text class="slot-value" :class="shift">{{ shift }}</text>
+              <text class="slot-value" :class="shiftTypeClass(shift)">{{ shift }}</text>
             </view>
           </view>
         </view>
@@ -518,11 +530,21 @@ function toggleRestDay(day: number) {
   font-size: 12px;
 }
 
-.pattern-item.早班 { background: #52C41A; }
-.pattern-item.中班 { background: #1890FF; }
-.pattern-item.晚班 { background: #722ED1; }
-.pattern-item.休息 { background: #999999; }
-.pattern-item.上班 { background: #FA8C16; }
+.pattern-item.shift-morning {
+  background: #52c41a;
+}
+.pattern-item.shift-afternoon {
+  background: #1890ff;
+}
+.pattern-item.shift-night {
+  background: #722ed1;
+}
+.pattern-item.shift-rest {
+  background: #999999;
+}
+.pattern-item.shift-work {
+  background: #fa8c16;
+}
 
 .empty-tip {
   color: #999;
@@ -655,11 +677,21 @@ function toggleRestDay(day: number) {
   font-weight: 500;
 }
 
-.slot-value.早班 { color: #52C41A; }
-.slot-value.中班 { color: #1890FF; }
-.slot-value.晚班 { color: #722ED1; }
-.slot-value.休息 { color: #999999; }
-.slot-value.上班 { color: #FA8C16; }
+.slot-value.shift-morning {
+  color: #52c41a;
+}
+.slot-value.shift-afternoon {
+  color: #1890ff;
+}
+.slot-value.shift-night {
+  color: #722ed1;
+}
+.slot-value.shift-rest {
+  color: #999999;
+}
+.slot-value.shift-work {
+  color: #fa8c16;
+}
 
 .form-actions {
   display: flex;

@@ -46,6 +46,19 @@ function getShiftForDate(date: dayjs.Dayjs) {
   return scheduleStore.getShift(employeeStore.currentEmployeeId, date.format('YYYY-MM-DD'))
 }
 
+/** 微信小程序 WXSS 不支持中文 class 选择器编译结果，用英文类名 */
+function shiftCellClass(shiftType: string | undefined) {
+  if (!shiftType) return 'empty'
+  const m: Record<string, string> = {
+    早班: 'shift-morning',
+    中班: 'shift-afternoon',
+    晚班: 'shift-night',
+    休息: 'shift-rest',
+    上班: 'shift-work'
+  }
+  return m[shiftType] || 'empty'
+}
+
 function prevWeek() {
   currentDate.value = currentDate.value.subtract(1, 'week')
 }
@@ -92,7 +105,7 @@ onMounted(() => {
         <view class="day-content" @click="openShiftPicker(date.format('YYYY-MM-DD'))">
           <view
             class="shift-cell"
-            :class="getShiftForDate(date)?.shiftType || 'empty'"
+            :class="shiftCellClass(getShiftForDate(date)?.shiftType)"
           >
             {{ getShiftForDate(date)?.shiftType || '点击设置' }}
           </view>
@@ -262,11 +275,21 @@ onMounted(() => {
   color: white;
 }
 
-.shift-cell.早班 { background: #52C41A; }
-.shift-cell.中班 { background: #1890FF; }
-.shift-cell.晚班 { background: #722ED1; }
-.shift-cell.休息 { background: #999999; }
-.shift-cell.上班 { background: #FA8C16; }
+.shift-cell.shift-morning {
+  background: #52c41a;
+}
+.shift-cell.shift-afternoon {
+  background: #1890ff;
+}
+.shift-cell.shift-night {
+  background: #722ed1;
+}
+.shift-cell.shift-rest {
+  background: #999999;
+}
+.shift-cell.shift-work {
+  background: #fa8c16;
+}
 .shift-cell.empty {
   background: #f5f5f5;
   color: #999;

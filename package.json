@@ -4,7 +4,9 @@
   "description": "日历排班小程序 - 支持农历、节日、多员工排班",
   "scripts": {
     "dev": "uni",
+    "dev:mp-weixin": "uni -p mp-weixin",
     "build": "uni build",
+    "build:mp-weixin": "uni build -p mp-weixin",
     "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {

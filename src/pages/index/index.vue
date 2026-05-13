@@ -338,18 +338,20 @@ onMounted(() => {
         <view v-if="day.showLunarFestivalRow" class="lunar-festival">
           {{ day.lunarHoliday }}
         </view>
-        <view class="holiday-tag" v-if="day.showStatutoryHolidayTag && day.holidayInfo">
-          {{ day.holidayInfo.name }}
-        </view>
-        <view
-          class="work-tag"
-          :class="{
-            rest: day.workType === 'rest',
-            legalMakeup: day.workType === 'legal-makeup',
-            singleMakeup: day.workType === 'single-rest-makeup'
-          }"
-        >
-          {{ day.workLabel }}
+        <view class="cell-tags-row">
+          <view class="holiday-tag" v-if="day.showStatutoryHolidayTag && day.holidayInfo">
+            {{ day.holidayInfo.name }}
+          </view>
+          <view
+            class="work-tag"
+            :class="{
+              rest: day.workType === 'rest',
+              legalMakeup: day.workType === 'legal-makeup',
+              singleMakeup: day.workType === 'single-rest-makeup'
+            }"
+          >
+            {{ day.workLabel }}
+          </view>
         </view>
       </view>
     </view>
@@ -530,7 +532,7 @@ onMounted(() => {
   background: white;
   border-radius: 8px;
   padding: 8px 0;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .week-day {
@@ -547,22 +549,30 @@ onMounted(() => {
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
+  /* 42 格 = 6 行；小程序对 grid-auto-rows/minmax 支持不稳定，改用固定行高 */
+  grid-template-rows: repeat(6, 182px);
+  row-gap: 10px;
+  column-gap: 6px;
   background: white;
   border-radius: 12px;
-  padding: 8px;
+  padding: 12px 8px 20px;
 }
 
 .day-cell {
-  aspect-ratio: 1;
-  min-height: 0;
-  padding: 4px;
+  box-sizing: border-box;
+  padding: 8px 4px 12px;
   border-radius: 8px;
   background: #fff;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
+  gap: 4px;
+  align-self: stretch;
+}
+
+.day-cell > view {
+  flex-shrink: 0;
 }
 
 .day-cell.weekend .day-number {
@@ -596,13 +606,15 @@ onMounted(() => {
   font-size: 15px;
   color: #333;
   font-weight: 500;
+  line-height: 1.2;
 }
 
 .lunar-calendar {
   max-width: 100%;
-  margin-top: 2px;
+  margin-top: 0;
   color: #999;
   font-size: 10px;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -614,32 +626,59 @@ onMounted(() => {
 
 .lunar-festival {
   max-width: 100%;
-  margin-top: 1px;
+  margin-top: 0;
   color: #ff6b6b;
   font-size: 9px;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 节日名与班/休：再拉开一点，避免贴底被裁 */
+.cell-tags-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+  padding-bottom: 2px;
+  flex-shrink: 0;
+}
+
 .holiday-tag {
-  margin-top: 2px;
-  padding: 1px 4px;
+  margin-top: 0;
+  padding: 3px 6px;
   border-radius: 4px;
   background: #ff6b6b;
   color: white;
-  font-size: 9px;
+  font-size: 10px;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .work-tag {
-  min-width: 14px;
-  margin-top: 2px;
-  padding: 1px 4px;
+  min-width: 26px;
+  min-height: 22px;
+  margin-top: 0;
+  padding: 4px 8px;
   border-radius: 4px;
   background: #fa8c16;
   color: white;
-  font-size: 9px;
+  font-size: 11px;
+  line-height: 1.35;
   text-align: center;
+  white-space: nowrap;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .work-tag.rest {
@@ -647,17 +686,17 @@ onMounted(() => {
 }
 
 .work-tag.legalMakeup {
-  min-width: 28px;
+  min-width: 32px;
   background: #f5222d;
 }
 
 .work-tag.singleMakeup {
-  min-width: 28px;
+  min-width: 32px;
   background: #722ed1;
 }
 
 .selected-detail {
-  margin-top: 16px;
+  margin-top: 24px;
   padding: 16px;
   border-radius: 12px;
   background: white;
