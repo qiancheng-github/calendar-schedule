@@ -42,15 +42,18 @@
     "selectedColor": "#fa8c16",
     "borderStyle": "black",
     "backgroundColor": "#ffffff",
-    "fontSize": "13px",
     "list": [
       {
         "pagePath": "pages/index/index",
-        "text": "日历"
+        "text": "日历",
+        "iconPath": "static/tabbar/calendar.png",
+        "selectedIconPath": "static/tabbar/calendar-active.png"
       },
       {
         "pagePath": "pages/settings/index",
-        "text": "设置"
+        "text": "设置",
+        "iconPath": "static/tabbar/settings.png",
+        "selectedIconPath": "static/tabbar/settings-active.png"
       }
     ]
   }

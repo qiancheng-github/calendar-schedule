@@ -37,8 +37,11 @@ export const useCalendarStore = defineStore('calendar', () => {
       days.push(currentDate.value.date(i))
     }
 
-    // 下月补齐 (42格日历 grid)
-    const remaining = 42 - days.length
+    // 下月补齐：只补到「上月占位 + 当月」占满的整行末尾，不强制 6 行 42 格（避免多出一整行非本月）
+    const used = days.length
+    const rows = Math.ceil(used / 7)
+    const totalCells = rows * 7
+    const remaining = totalCells - used
     for (let i = 1; i <= remaining; i++) {
       days.push(currentDate.value.add(1, 'month').date(i))
     }

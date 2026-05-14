@@ -44,21 +44,6 @@ const DayName = ['初一', '初二', '初三', '初四', '初五', '初六', '�
   '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十',
   '廿一', '廿二', '廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十']
 
-const MonthNumber: Record<string, number> = {
-  正: 1,
-  二: 2,
-  三: 3,
-  四: 4,
-  五: 5,
-  六: 6,
-  七: 7,
-  八: 8,
-  九: 9,
-  十: 10,
-  冬: 11,
-  腊: 12
-}
-
 /**
  * 获取农历信息
  */
@@ -114,38 +99,93 @@ function toDate(lYear: number, lMonth: number, lDay: number): Date | null {
   return new Date(baseDate.getTime() + offset * 86400000)
 }
 
+/** 公历日相对 1900-01-31 的整数天偏移（与 lunarInfo 表一致；不用 Intl，兼容微信小程序） */
+function solarToOffsetDays(date: Date): number {
+  return Math.floor(
+    (Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) - Date.UTC(1900, 0, 31)) / 86400000
+  )
+}
+
 /**
- * 阳历转农历
+ * 阳历转农历（查 lunarInfo 表，不依赖 Intl）
  */
 export function solarToLunar(date: Date): LunarDate {
-  const formatter = new Intl.DateTimeFormat('zh-CN-u-ca-chinese', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  })
-  const parts = formatter.formatToParts(date) as Array<{ type: string; value: string }>
-  const relatedYear = parts.find(part => part.type === 'relatedYear')?.value
-  const yearName = parts.find(part => part.type === 'yearName')?.value
-  const monthText = parts.find(part => part.type === 'month')?.value || '正月'
-  const dayText = parts.find(part => part.type === 'day')?.value || '1'
+  const y = date.getFullYear()
+  const m = date.getMonth() + 1
+  const d = date.getDate()
 
-  const year = Number(relatedYear || date.getFullYear())
-  const rawMonthName = monthText.replace('月', '')
-  const isLeap = rawMonthName.startsWith('闰')
-  const monthName = isLeap ? rawMonthName.slice(1) : rawMonthName
-  const month = MonthNumber[monthName] || 1
-  const day = Number(dayText)
-  const zhiIndex = (year - 4) % 12
+  if (y < 1900 || y > 2100 || (y === 1900 && m === 1 && d < 31)) {
+    const zhiIndex = (y - 4) % 12
+    return {
+      year: y,
+      month: 1,
+      day: 1,
+      isLeap: false,
+      lunarYearName: Gan[(y - 4) % 10] + Zhi[zhiIndex < 0 ? zhiIndex + 12 : zhiIndex],
+      animal: Animals[zhiIndex < 0 ? zhiIndex + 12 : zhiIndex],
+      monthName: '正',
+      dayName: '初一'
+    }
+  }
+
+  let offset = solarToOffsetDays(date)
+  let i: number
+  let temp = 0
+
+  for (i = 1900; i < 2101 && offset > 0; i++) {
+    temp = lYearDays(i)
+    offset -= temp
+  }
+  if (offset < 0) {
+    offset += temp
+    i--
+  }
+
+  const lunarYear = i
+  const leap = leapMonth(lunarYear)
+  let isLeap = false
+
+  for (i = 1; i < 13 && offset > 0; i++) {
+    if (leap > 0 && i === leap + 1 && !isLeap) {
+      i--
+      isLeap = true
+      temp = leapDays(lunarYear)
+    } else {
+      temp = monthDays(lunarYear, i)
+    }
+    if (isLeap && leap > 0 && i === leap + 1) {
+      isLeap = false
+    }
+    offset -= temp
+  }
+
+  if (offset === 0 && leap > 0 && i === leap + 1) {
+    if (isLeap) {
+      isLeap = false
+    } else {
+      isLeap = true
+      i--
+    }
+  }
+  if (offset < 0) {
+    offset += temp
+    i--
+  }
+
+  const lunarMonth = i
+  const lunarDay = offset + 1
+  const zhiIndex = ((lunarYear - 4) % 12 + 12) % 12
+  const rawMonthName = MonthName[lunarMonth - 1] || '正'
 
   return {
-    year,
-    month,
-    day,
+    year: lunarYear,
+    month: lunarMonth,
+    day: lunarDay,
     isLeap,
-    lunarYearName: yearName || Gan[(year - 4) % 10] + Zhi[zhiIndex],
+    lunarYearName: Gan[((lunarYear - 4) % 10 + 10) % 10] + Zhi[zhiIndex],
     animal: Animals[zhiIndex],
-    monthName: isLeap ? `闰${monthName}` : monthName,
-    dayName: DayName[day - 1] || `${day}`
+    monthName: isLeap ? `闰${rawMonthName}` : rawMonthName,
+    dayName: DayName[lunarDay - 1] || `${lunarDay}`
   }
 }
 

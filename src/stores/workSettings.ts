@@ -35,8 +35,19 @@ export const useWorkSettingsStore = defineStore('workSettings', () => {
     }
 
     const savedOverrides = uni.getStorageSync('workDayOverrides')
-    if (savedOverrides) {
-      dayOverrides.value = JSON.parse(savedOverrides)
+    if (savedOverrides && typeof savedOverrides === 'string') {
+      try {
+        const parsed = JSON.parse(savedOverrides) as Record<string, ManualWorkDayType>
+        if (parsed && typeof parsed === 'object') {
+          dayOverrides.value = parsed
+        }
+      } catch {
+        try {
+          uni.removeStorageSync('workDayOverrides')
+        } catch {
+          /* ignore */
+        }
+      }
     }
   }
 

@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { onLaunch } from '@dcloudio/uni-app'
+import { useDayMemosStore } from '@/stores/dayMemos'
+import { useWorkSettingsStore } from '@/stores/workSettings'
+
 onLaunch(() => {
-  console.log('App Launched')
+  try {
+    useWorkSettingsStore().loadFromStorage()
+    useDayMemosStore().loadFromStorage()
+  } catch (e) {
+    console.warn('[App] loadFromStorage', e)
+  }
 })
 </script>
 

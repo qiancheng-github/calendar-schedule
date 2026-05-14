@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useCalendarStore } from '@/stores/calendar'
-import { useWorkSettingsStore, type ManualWorkDayType, type WorkMode } from '@/stores/workSettings'
+import { useDayMemosStore } from '@/stores/dayMemos'
+import { useWorkSettingsStore, type ManualWorkDayType, type WorkMode, type WorkDayType } from '@/stores/workSettings'
 import { solarToLunar, getLunarHoliday, formatLunarCalendarCell } from '@/utils/lunar'
 import { getHolidayInfo, holidayData, holidayDisplayBaseName, getStatutoryHolidayPeriodsForYear, type StatutoryHolidayPeriod } from '@/static/holiday-data'
 import dayjs from 'dayjs'
 
 const calendarStore = useCalendarStore()
 const workSettingsStore = useWorkSettingsStore()
+const dayMemosStore = useDayMemosStore()
 
 const weekDays = ['日', '一', '二', '三', '四', '五', '六']
 const modeLabels: Record<WorkMode, string> = {
@@ -28,6 +30,58 @@ const deferTipText = computed(() =>
     ? '单休补班顺延已开，会影响大小周里被假期占掉的上班周六。'
     : '单休补班顺延已关，只按法定补班和手动设置计算。'
 )
+
+/** 月历格子：仅扁平字段，避免 dayjs / 大对象进 setData 导致真机「Error: timeout」 */
+interface CalendarCell {
+  dateStr: string
+  day: number
+  lunarCalendarText: string
+  lunarHoliday: string
+  showLunarFestivalRow: boolean
+  showStatutoryHolidayTag: boolean
+  statutoryHolidayName: string
+  workType: WorkDayType
+  workLabel: string
+  isCurrentMonth: boolean
+  isToday: boolean
+  isSelected: boolean
+  isWeekend: boolean
+  isLunarOrStatHoliday: boolean
+  hasMemo: boolean
+}
+
+function getCellDayInfo(date: dayjs.Dayjs): CalendarCell {
+  const dateStr = date.format('YYYY-MM-DD')
+  const d = date.toDate()
+  const lunarHoliday = getLunarHoliday(d)
+  const holidayInfo = getHolidayInfo(d)
+  const workType = workSettingsStore.getDayWorkType(d)
+  const workLabel = workSettingsStore.getDayWorkLabel(d)
+  const isCurrentMonth = calendarStore.isCurrentMonth(date)
+
+  const lunarCalendarText = formatLunarCalendarCell(d)
+  const showStatutoryHolidayTag = !!(holidayInfo && holidayInfo.isHoliday)
+  const statutoryBase = holidayInfo && holidayInfo.isHoliday ? holidayDisplayBaseName(holidayInfo.name) : ''
+  const showLunarFestivalRow = !!lunarHoliday && lunarHoliday !== statutoryBase
+
+  return {
+    dateStr,
+    day: date.date(),
+    lunarCalendarText,
+    lunarHoliday: lunarHoliday || '',
+    showLunarFestivalRow,
+    showStatutoryHolidayTag,
+    statutoryHolidayName: showStatutoryHolidayTag && holidayInfo ? holidayInfo.name : '',
+    workType,
+    workLabel,
+    isCurrentMonth,
+    isToday: calendarStore.isToday(date),
+    isSelected: calendarStore.isSelected(date),
+    isWeekend: date.day() === 0 || date.day() === 6,
+    isLunarOrStatHoliday: !!lunarHoliday || !!(holidayInfo && holidayInfo.isHoliday),
+    hasMemo: dayMemosStore.hasMemo(dateStr)
+  }
+}
 
 function getDayInfo(date: dayjs.Dayjs) {
   const dateStr = date.format('YYYY-MM-DD')
@@ -62,22 +116,42 @@ function getDayInfo(date: dayjs.Dayjs) {
     workLabel,
     isCurrentMonth,
     isToday: calendarStore.isToday(date),
-    isSelected: calendarStore.isSelected(date)
+    isSelected: calendarStore.isSelected(date),
+    /** 避免模板里写 day.date.day()、optional chaining，部分安卓小程序渲染异常 */
+    isWeekend: date.day() === 0 || date.day() === 6,
+    isLunarOrStatHoliday: !!lunarHoliday || !!(holidayInfo && holidayInfo.isHoliday)
   }
 }
 
-const days = computed(() => calendarStore.calendarDays.map(day => getDayInfo(day)))
+const days = computed(() => calendarStore.calendarDays.map(d => getCellDayInfo(d)))
 
-function countWorkDaysBeforeHolidayStart(holidayStart: dayjs.Dayjs, mode: WorkMode): number {
+/** 下一连休段日期展示：单日 MM月DD日；同日历年多日 MM月DD日 - MM月DD日；跨年带年份 */
+function formatRestDateRange(start: dayjs.Dayjs, end: dayjs.Dayjs): string {
+  const s = start.startOf('day')
+  const e = end.startOf('day')
+  if (s.isSame(e, 'day')) return s.format('MM月DD日')
+  if (s.year() === e.year()) {
+    return `${s.format('MM月DD日')} - ${e.format('MM月DD日')}`
+  }
+  return `${s.format('YYYY年MM月DD日')} - ${e.format('YYYY年MM月DD日')}`
+}
+
+/** 从「今天」起算到目标日（不含目标日当天）之间要上的班数；今天若是休则不计入 */
+function countWorkDaysBeforeDate(targetDay: dayjs.Dayjs, mode: WorkMode): number {
   const today = dayjs().startOf('day')
-  if (!holidayStart.isAfter(today, 'day')) return 0
+  const start = targetDay.startOf('day')
+  if (!start.isAfter(today, 'day')) return 0
   let count = 0
-  let cursor = today.add(1, 'day')
-  while (cursor.isBefore(holidayStart, 'day')) {
+  let cursor = today
+  while (cursor.isBefore(start, 'day')) {
     if (workSettingsStore.getDayWorkTypeByMode(cursor.toDate(), mode) !== 'rest') count++
     cursor = cursor.add(1, 'day')
   }
   return count
+}
+
+function countWorkDaysBeforeHolidayStart(holidayStart: dayjs.Dayjs, mode: WorkMode): number {
+  return countWorkDaysBeforeDate(holidayStart, mode)
 }
 
 function getNextLegalHoliday() {
@@ -145,6 +219,62 @@ const currentMonthWorkdayCount = computed(() => {
   return n
 })
 
+/** 从今日到当月末还剩几个工作日；未到当月为 null（不跟「共 N 天」）；已过月为 0 */
+const monthRemainWorkdaysSuffix = computed(() => {
+  const monthStart = calendarStore.currentDate.startOf('month')
+  const monthEnd = calendarStore.currentDate.endOf('month')
+  const today = dayjs().startOf('day')
+  if (today.isBefore(monthStart, 'day')) {
+    return null
+  }
+  if (monthEnd.isBefore(today, 'day')) {
+    return 0
+  }
+  let n = 0
+  let cur = today
+  while (!cur.isAfter(monthEnd, 'day')) {
+    if (workSettingsStore.getDayWorkType(cur.toDate()) !== 'rest') n++
+    cur = cur.add(1, 'day')
+  }
+  return n
+})
+
+/** 下一个「休」：从明天起找；对比逻辑与「下个法定假日」一致 */
+const nextRestInsight = computed(() => {
+  const today = dayjs().startOf('day')
+  let cur = today.add(1, 'day')
+  for (let i = 0; i < 400; i++) {
+    if (workSettingsStore.getDayWorkType(cur.toDate()) === 'rest') {
+      const restStart = cur.startOf('day')
+      let restEnd = restStart
+      for (let j = 0; j < 400; j++) {
+        const next = restEnd.add(1, 'day')
+        if (workSettingsStore.getDayWorkType(next.toDate()) !== 'rest') break
+        restEnd = next
+      }
+      const counts: Record<WorkMode, number> = {
+        'double-weekend': countWorkDaysBeforeDate(restStart, 'double-weekend'),
+        'big-small-week': countWorkDaysBeforeDate(restStart, 'big-small-week'),
+        'single-rest': countWorkDaysBeforeDate(restStart, 'single-rest')
+      }
+      const currentMode = workSettingsStore.mode
+      const currentCount = counts[currentMode]
+      const comparisons = (Object.keys(counts) as WorkMode[])
+        .filter(m => m !== currentMode)
+        .map(m => formatDiff(currentCount, counts[m], m))
+      const wd = ['日', '一', '二', '三', '四', '五', '六'][restStart.day()]
+      return {
+        weekdayLabel: `周${wd}`,
+        dateText: formatRestDateRange(restStart, restEnd),
+        currentCount,
+        comparisons
+      }
+    }
+    cur = cur.add(1, 'day')
+  }
+  return null
+})
+
 /** 当前查看年份：工作日 / 总天数 / 上班占比 + 与其它作息的全年对比 */
 const viewedYearWorkStats = computed(() => {
   const year = calendarStore.currentDate.year()
@@ -191,7 +321,6 @@ function buildHolidayInsight(
   const end = dayjs(p.end).startOf('day')
   const ended = today.isAfter(end, 'day')
   const notStarted = today.isBefore(start, 'day')
-  const daysAway = start.diff(today, 'day')
 
   let status: HolidayInsightStatus = 'in-progress'
   if (ended) status = 'ended'
@@ -212,14 +341,20 @@ function buildHolidayInsight(
       .map(mode => formatDiff(currentCount, counts[mode], mode))
   }
 
+  const teaserLine =
+    status === 'upcoming' ? `加上今天还有 ${currentCount} 天班 · 点开展开详情` : ''
+
   return {
     key: `${p.name}-${p.start}-${idx}`,
     name: p.name,
     dateText: formatStatutoryPeriod(p),
-    daysAway,
     status,
     currentCount,
-    comparisons
+    comparisons,
+    teaserLine,
+    workdaysPrefix: status === 'upcoming' ? '加上今天还有 ' : '',
+    workdaysCountStr: status === 'upcoming' ? String(currentCount) : '',
+    workdaysSuffix: status === 'upcoming' ? ' 天班' : ''
   }
 }
 
@@ -274,8 +409,88 @@ const holidayTip = computed(() => {
   }
 })
 
-function onDayClick(day: ReturnType<typeof getDayInfo>) {
-  calendarStore.selectDate(day.date)
+/** 微信小程序真机：避免在模板里对 Pinia 内的 dayjs 链式调用，易导致数字/日期整段不渲染 */
+const navMonthTitle = computed(() => calendarStore.currentDate.format('YYYY年MM月'))
+
+const monthWorkdaysSummaryLine = computed(
+  () => `${calendarStore.currentDate.format('M')}月 · 共 ${currentMonthWorkdayCount.value} 天`
+)
+
+const monthRemainWorkdaysLine = computed(() => {
+  const s = monthRemainWorkdaysSuffix.value
+  if (s === null) return ''
+  return `· 还剩${s}天`
+})
+
+const selectedDayPanel = computed(() => {
+  const d = calendarStore.selectedDate
+  if (!d) return null
+  return getDayInfo(d)
+})
+
+const memoDraft = ref('')
+
+watch(
+  () => selectedDayPanel.value?.dateStr,
+  (ds: string | undefined) => {
+    memoDraft.value = ds ? dayMemosStore.getMemo(ds) : ''
+  },
+  { immediate: true }
+)
+
+function saveSelectedMemo() {
+  const ds = selectedDayPanel.value?.dateStr
+  if (!ds) return
+  dayMemosStore.setMemo(ds, memoDraft.value)
+  uni.showToast({ title: '已保存', icon: 'success', duration: 1200 })
+}
+
+function clearSelectedMemo() {
+  const ds = selectedDayPanel.value?.dateStr
+  if (!ds) return
+  memoDraft.value = ''
+  dayMemosStore.setMemo(ds, '')
+  uni.showToast({ title: '已清空', icon: 'none', duration: 1200 })
+}
+
+const selectedHeadDateText = computed(() =>
+  calendarStore.selectedDate ? calendarStore.selectedDate.format('YYYY年MM月DD日') : ''
+)
+
+const selectedHeadWeekChar = computed(() =>
+  calendarStore.selectedDate ? weekDays[calendarStore.selectedDate.day()] : ''
+)
+
+const nextRestCountStr = computed(() =>
+  nextRestInsight.value ? String(nextRestInsight.value.currentCount) : ''
+)
+
+const yearRatioTitleText = computed(() => `${viewedYearWorkStats.value.year} 年全年上班占比`)
+const yearRatioPctText = computed(() => `${viewedYearWorkStats.value.ratioPct}%`)
+const yearRatioDetailText = computed(
+  () =>
+    `工作日 ${viewedYearWorkStats.value.work} 天 · 休息 ${viewedYearWorkStats.value.rest} 天 · 全年共 ${viewedYearWorkStats.value.total} 天`
+)
+const yearRatioModeHint = computed(() => `（按当前${workSettingsStore.modeLabel}推算）`)
+
+const holidayTipPanel = computed(() => {
+  const t = holidayTip.value
+  if (!t) return null
+  return {
+    name: t.holiday.name,
+    dateText: t.dateText,
+    countStr: String(t.currentCount),
+    workLine: `加上今天还有 ${t.currentCount} 天班`,
+    comparisons: t.comparisons
+  }
+})
+
+const yearRatioComparisons = computed(() => viewedYearWorkStats.value.comparisons)
+
+const nextRestComparisons = computed(() => nextRestInsight.value?.comparisons ?? [])
+
+function onDayClick(day: CalendarCell) {
+  calendarStore.selectDate(dayjs(day.dateStr))
 }
 
 function setSelectedWorkType(type: ManualWorkDayType) {
@@ -290,28 +505,29 @@ function clearSelectedWorkType() {
 
 onMounted(() => {
   workSettingsStore.loadFromStorage()
+  dayMemosStore.loadFromStorage()
 })
 </script>
 
 <template>
   <view class="container">
     <view class="month-nav">
-      <view class="nav-btn" @click="calendarStore.prevMonth()">‹</view>
+      <view class="nav-btn" @click="calendarStore.prevMonth()"><text>‹</text></view>
       <view class="month-center">
-        <view class="month-title">{{ calendarStore.currentDate.format('YYYY年MM月') }}</view>
-        <view class="today-btn" @click="calendarStore.goToToday()">回到今日</view>
+        <text class="month-title">{{ navMonthTitle }}</text>
+        <view class="today-btn" @click="calendarStore.goToToday()"><text>回到今日</text></view>
       </view>
-      <view class="nav-btn" @click="calendarStore.nextMonth()">›</view>
+      <view class="nav-btn" @click="calendarStore.nextMonth()"><text>›</text></view>
     </view>
 
     <view class="week-header">
       <view
         class="week-day"
-        v-for="(day, index) in weekDays"
+        v-for="(wd, index) in weekDays"
         :key="index"
         :class="{ weekend: index === 0 || index === 6 }"
       >
-        {{ day }}
+        <text>{{ wd }}</text>
       </view>
     </view>
 
@@ -324,25 +540,25 @@ onMounted(() => {
           'other-month': !day.isCurrentMonth,
           'is-today': day.isToday,
           'is-selected': day.isSelected,
-          'weekend': day.date.day() === 0 || day.date.day() === 6
+          weekend: day.isWeekend
         }"
         @click="onDayClick(day)"
       >
-        <view class="day-number">{{ day.day }}</view>
-        <view
+        <text class="day-number">{{ day.day }}</text>
+        <text
           class="lunar-calendar"
-          :class="{ 'is-holiday': day.lunarHoliday || day.holidayInfo?.isHoliday }"
+          :class="{ 'is-holiday': day.isLunarOrStatHoliday }"
         >
           {{ day.lunarCalendarText }}
-        </view>
-        <view v-if="day.showLunarFestivalRow" class="lunar-festival">
+        </text>
+        <text v-if="day.showLunarFestivalRow" class="lunar-festival">
           {{ day.lunarHoliday }}
-        </view>
+        </text>
         <view class="cell-tags-row">
-          <view class="holiday-tag" v-if="day.showStatutoryHolidayTag && day.holidayInfo">
-            {{ day.holidayInfo.name }}
+          <view class="holiday-tag" v-if="day.showStatutoryHolidayTag">
+            <text>{{ day.statutoryHolidayName }}</text>
           </view>
-          <view
+          <text
             class="work-tag"
             :class="{
               rest: day.workType === 'rest',
@@ -351,28 +567,31 @@ onMounted(() => {
             }"
           >
             {{ day.workLabel }}
-          </view>
+          </text>
+        </view>
+        <view v-if="day.hasMemo" class="memo-dot-wrap">
+          <view class="memo-dot" />
         </view>
       </view>
     </view>
 
-    <view class="selected-detail" v-if="calendarStore.selectedDate">
+    <view class="selected-detail" v-if="selectedDayPanel">
       <view class="detail-header">
-        <text class="detail-date">{{ calendarStore.selectedDate.format('YYYY年MM月DD日') }}</text>
-        <text class="detail-week">{{ weekDays[calendarStore.selectedDate.day()] }}</text>
+        <text class="detail-date">{{ selectedHeadDateText }}</text>
+        <text class="detail-week">{{ selectedHeadWeekChar }}</text>
       </view>
       <view class="detail-info">
         <text class="detail-lunar">
-          {{ getDayInfo(calendarStore.selectedDate).lunar.lunarYearName }}年
-          {{ getDayInfo(calendarStore.selectedDate).lunar.monthName }}月
-          {{ getDayInfo(calendarStore.selectedDate).lunar.dayName }}
+          {{ selectedDayPanel.lunar.lunarYearName }}年
+          {{ selectedDayPanel.lunar.monthName }}月
+          {{ selectedDayPanel.lunar.dayName }}
         </text>
       </view>
       <view class="detail-status">
-        <text :class="getDayInfo(calendarStore.selectedDate).workStatus ? 'status-work' : 'status-rest'">
-          {{ getDayInfo(calendarStore.selectedDate).workLabel }}
+        <text :class="selectedDayPanel.workStatus ? 'status-work' : 'status-rest'">
+          {{ selectedDayPanel.workLabel }}
         </text>
-        <text class="manual-tip" v-if="getDayInfo(calendarStore.selectedDate).workOverride">手动</text>
+        <text class="manual-tip" v-if="selectedDayPanel.workOverride">手动</text>
       </view>
       <view class="manual-actions">
         <view class="manual-btn work" @click="setSelectedWorkType('work')">设为班</view>
@@ -380,52 +599,93 @@ onMounted(() => {
         <view class="manual-btn makeup" @click="setSelectedWorkType('legal-makeup')">设为法补</view>
         <view class="manual-btn auto" @click="clearSelectedWorkType">恢复自动</view>
       </view>
+      <view class="memo-section">
+        <text class="memo-title">备忘录</text>
+        <textarea
+          class="memo-input"
+          v-model="memoDraft"
+          maxlength="500"
+          placeholder="这一天写点什么…"
+          :auto-height="true"
+        />
+        <view class="memo-actions">
+          <view class="memo-btn memo-btn-save" @click="saveSelectedMemo"><text>保存</text></view>
+          <view class="memo-btn memo-btn-clear" @click="clearSelectedMemo"><text>清空</text></view>
+        </view>
+      </view>
     </view>
 
     <view class="holiday-summary">
-      <view class="month-workdays-line">
-        <view class="month-workdays-main">
-          <text class="month-workdays-title">本月工作日</text>
-          <text class="month-workdays-sub">{{ calendarStore.currentDate.format('M') }}月 · 共 {{ currentMonthWorkdayCount }} 天</text>
+      <view v-if="nextRestInsight" class="summary-card summary-card-accent">
+        <view class="next-rest-head">
+          <view class="next-rest-badge"><text>休</text></view>
+          <text class="next-rest-heading">下一个休息日</text>
         </view>
-      </view>
-      <view class="summary-divider" />
-      <template v-if="holidayTip">
-        <view class="summary-title">下个法定假日</view>
-        <view class="summary-main">
-          <text class="summary-name">{{ holidayTip.holiday.name }}</text>
-          <text class="summary-date">{{ holidayTip.dateText }}</text>
+        <view class="summary-main next-rest-main">
+          <text class="summary-name next-rest-weekday">{{ nextRestInsight.weekdayLabel }}</text>
+          <text class="summary-date next-rest-date">{{ nextRestInsight.dateText }}</text>
         </view>
-        <view class="summary-line">
-          还有 {{ holidayTip.holiday.daysAway }} 天，按当前{{ workSettingsStore.modeLabel }}还要上
-          <text class="summary-count">{{ holidayTip.currentCount }}</text>
-          天班
+        <view class="summary-line next-rest-line">
+          <text>加上今天还有</text>
+          <text class="summary-count next-rest-count">{{ nextRestCountStr }}</text>
+          <text>天班</text>
         </view>
-        <view class="summary-compare">
-          <view class="compare-item" v-for="item in holidayTip.comparisons" :key="item">
-            {{ item }}
+        <view class="summary-compare" v-if="nextRestComparisons.length">
+          <view class="compare-item compare-item-on-accent" v-for="item in nextRestComparisons" :key="item">
+            <text>{{ item }}</text>
           </view>
         </view>
-      </template>
-      <view v-else class="summary-no-next">
+      </view>
+
+      <view class="summary-card">
+        <view class="month-workdays-line">
+          <view class="month-workdays-main">
+            <text class="month-workdays-title">本月工作日</text>
+            <view class="month-workdays-row">
+              <text class="month-workdays-sub">{{ monthWorkdaysSummaryLine }}</text>
+              <text v-if="monthRemainWorkdaysSuffix !== null" class="month-workdays-remain">
+                {{ monthRemainWorkdaysLine }}
+              </text>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view v-if="holidayTipPanel" class="summary-card">
+        <text class="summary-title">下个法定假日</text>
+        <view class="summary-main">
+          <text class="summary-name">{{ holidayTipPanel.name }}</text>
+          <text class="summary-date">{{ holidayTipPanel.dateText }}</text>
+        </view>
+        <view class="summary-line">
+          <text>{{ holidayTipPanel.workLine }}</text>
+        </view>
+        <view class="summary-compare">
+          <view class="compare-item" v-for="item in holidayTipPanel.comparisons" :key="item">
+            <text>{{ item }}</text>
+          </view>
+        </view>
+      </view>
+      <view v-else class="summary-card summary-card-plain">
         <text class="summary-title">下个法定假日</text>
         <text class="summary-no-next-desc">暂无之后的法定放假数据</text>
       </view>
-      <view class="summary-divider" />
-      <view class="year-ratio-block">
-        <view class="year-ratio-title">{{ viewedYearWorkStats.year }} 年全年上班占比</view>
-        <view class="year-ratio-pct-row">
-          <text class="year-ratio-pct">{{ viewedYearWorkStats.ratioPct }}%</text>
-          <text class="year-ratio-label">（按当前{{ workSettingsStore.modeLabel }}推算）</text>
-        </view>
-        <view class="year-ratio-detail">
-          工作日 {{ viewedYearWorkStats.work }} 天 · 休息 {{ viewedYearWorkStats.rest }} 天 · 全年共 {{ viewedYearWorkStats.total }} 天
-        </view>
-        <view class="summary-compare year-ratio-compare" v-if="viewedYearWorkStats.comparisons.length">
-          <view class="compare-item" v-for="c in viewedYearWorkStats.comparisons" :key="c">{{ c }}</view>
+
+      <view class="summary-card">
+        <view class="year-ratio-block">
+          <text class="year-ratio-title">{{ yearRatioTitleText }}</text>
+          <view class="year-ratio-pct-row">
+            <text class="year-ratio-pct">{{ yearRatioPctText }}</text>
+            <text class="year-ratio-label">{{ yearRatioModeHint }}</text>
+          </view>
+          <text class="year-ratio-detail">{{ yearRatioDetailText }}</text>
+          <view class="summary-compare year-ratio-compare" v-if="yearRatioComparisons.length">
+            <view class="compare-item" v-for="c in yearRatioComparisons" :key="c"><text>{{ c }}</text></view>
+          </view>
         </view>
       </view>
-      <view class="summary-note">{{ deferTipText }}</view>
+
+      <text class="summary-note">{{ deferTipText }}</text>
     </view>
 
     <view class="spring-holiday-list" v-if="holidaysUntilSpringInsights.length">
@@ -442,7 +702,7 @@ onMounted(() => {
             <text
               v-if="!expandedHolidayKeys[item.key] && item.status === 'upcoming'"
               class="accordion-teaser"
-            >还有 {{ item.daysAway }} 天 · 点开展开详情</text>
+            >{{ item.teaserLine }}</text>
             <text
               v-else-if="!expandedHolidayKeys[item.key] && item.status === 'in-progress'"
               class="accordion-teaser"
@@ -457,12 +717,12 @@ onMounted(() => {
         <view v-show="expandedHolidayKeys[item.key]" class="accordion-body">
           <template v-if="item.status === 'upcoming'">
             <view class="summary-line">
-              还有 {{ item.daysAway }} 天，按当前{{ workSettingsStore.modeLabel }}还要上
-              <text class="summary-count">{{ item.currentCount }}</text>
-              天班
+              <text>{{ item.workdaysPrefix }}</text>
+              <text class="summary-count">{{ item.workdaysCountStr }}</text>
+              <text>{{ item.workdaysSuffix }}</text>
             </view>
             <view class="summary-compare" v-if="item.comparisons.length">
-              <view class="compare-item" v-for="c in item.comparisons" :key="c">{{ c }}</view>
+              <view class="compare-item" v-for="c in item.comparisons" :key="c"><text>{{ c }}</text></view>
             </view>
           </template>
           <view v-else-if="item.status === 'in-progress'" class="insight-status-msg">假期进行中</view>
@@ -488,7 +748,6 @@ onMounted(() => {
   justify-content: space-between;
   padding: 10px 0;
   margin-bottom: 8px;
-  gap: 8px;
 }
 
 .month-center {
@@ -496,20 +755,26 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
   min-width: 0;
 }
 
 .month-title {
+  display: block;
+  text-align: center;
   font-size: 17px;
   font-weight: 600;
   color: #333;
 }
 
 .today-btn {
+  margin-top: 4px;
   font-size: 13px;
   color: #1890ff;
   padding: 4px 10px;
+}
+
+.today-btn text {
+  color: #1890ff;
 }
 
 .nav-btn {
@@ -526,20 +791,33 @@ onMounted(() => {
   line-height: 1;
 }
 
+.nav-btn text {
+  color: #666;
+  line-height: 1;
+}
+
 .week-header {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: space-between;
   background: white;
   border-radius: 8px;
-  padding: 8px 0;
-  margin-bottom: 10px;
+  padding: 8px 4px;
+  margin-bottom: 6px;
 }
 
 .week-day {
+  flex: 1;
   text-align: center;
   font-size: 12px;
   color: #666;
   padding: 6px 0;
+}
+
+.week-day text {
+  font-size: 12px;
+  color: inherit;
 }
 
 .week-day.weekend {
@@ -547,31 +825,38 @@ onMounted(() => {
 }
 
 .calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  /* 42 格 = 6 行；小程序对 grid-auto-rows/minmax 支持不稳定，改用固定行高 */
-  grid-template-rows: repeat(6, 182px);
-  row-gap: 10px;
-  column-gap: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  justify-content: flex-start;
+  align-items: stretch;
+  box-sizing: border-box;
   background: white;
   border-radius: 12px;
-  padding: 12px 8px 20px;
+  padding: 8px 5px 10px;
 }
 
 .day-cell {
   box-sizing: border-box;
-  padding: 8px 4px 12px;
+  flex: 0 0 calc((100% - 18px) / 7);
+  width: calc((100% - 18px) / 7);
+  max-width: calc((100% - 18px) / 7);
+  padding: 4px 2px 6px;
   border-radius: 8px;
   background: #fff;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 4px;
-  align-self: stretch;
+  margin-right: 3px;
+  margin-bottom: 4px;
 }
 
-.day-cell > view {
+.day-cell:nth-child(7n) {
+  margin-right: 0;
+}
+
+.day-cell > text {
   flex-shrink: 0;
 }
 
@@ -603,21 +888,25 @@ onMounted(() => {
 }
 
 .day-number {
+  display: block;
   font-size: 15px;
   color: #333;
   font-weight: 500;
   line-height: 1.2;
+  text-align: center;
 }
 
 .lunar-calendar {
+  display: block;
   max-width: 100%;
-  margin-top: 0;
+  margin-top: 2px;
   color: #999;
   font-size: 10px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
 }
 
 .lunar-calendar.is-holiday {
@@ -625,37 +914,42 @@ onMounted(() => {
 }
 
 .lunar-festival {
+  display: block;
   max-width: 100%;
-  margin-top: 0;
+  margin-top: 2px;
   color: #ff6b6b;
   font-size: 9px;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
 }
 
-/* 节日名与班/休：再拉开一点，避免贴底被裁 */
+/* 节日名与班/休 */
 .cell-tags-row {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
   width: 100%;
-  margin-top: 4px;
-  padding-bottom: 2px;
+  margin-top: 1px;
+  padding-bottom: 0;
   flex-shrink: 0;
+}
+
+.holiday-tag + .work-tag {
+  margin-top: 4px;
 }
 
 .holiday-tag {
   margin-top: 0;
-  padding: 3px 6px;
+  padding: 2px 4px;
   border-radius: 4px;
   background: #ff6b6b;
   color: white;
   font-size: 10px;
-  line-height: 1.25;
+  line-height: 1.2;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -663,22 +957,26 @@ onMounted(() => {
   box-sizing: border-box;
 }
 
+.holiday-tag text {
+  color: #fff;
+  font-size: 10px;
+}
+
 .work-tag {
-  min-width: 26px;
-  min-height: 22px;
+  display: inline-block;
+  min-width: 22px;
+  min-height: 18px;
   margin-top: 0;
-  padding: 4px 8px;
+  padding: 2px 5px;
   border-radius: 4px;
   background: #fa8c16;
   color: white;
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 10px;
+  line-height: 1.3;
   text-align: center;
+  vertical-align: middle;
   white-space: nowrap;
   box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .work-tag.rest {
@@ -695,8 +993,27 @@ onMounted(() => {
   background: #722ed1;
 }
 
+.memo-dot-wrap {
+  margin-top: 2px;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.memo-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #1890ff;
+}
+
+.day-cell.is-selected .memo-dot {
+  background: rgba(255, 255, 255, 0.95);
+}
+
 .selected-detail {
-  margin-top: 24px;
+  margin-top: 14px;
   padding: 16px;
   border-radius: 12px;
   background: white;
@@ -705,8 +1022,11 @@ onMounted(() => {
 .detail-header {
   display: flex;
   align-items: baseline;
-  gap: 8px;
   margin-bottom: 8px;
+}
+
+.detail-header .detail-date {
+  margin-right: 8px;
 }
 
 .detail-date {
@@ -729,7 +1049,11 @@ onMounted(() => {
   margin-top: 8px;
   display: flex;
   align-items: center;
-  gap: 8px;
+}
+
+.detail-status .status-work,
+.detail-status .status-rest {
+  margin-right: 8px;
 }
 
 .status-work {
@@ -753,7 +1077,8 @@ onMounted(() => {
 .manual-actions {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  grid-row-gap: 8px;
+  grid-column-gap: 8px;
   margin-top: 12px;
 }
 
@@ -781,14 +1106,172 @@ onMounted(() => {
   background: #8c8c8c;
 }
 
+.memo-section {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.memo-title {
+  display: block;
+  margin-bottom: 8px;
+  color: #333;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.memo-input {
+  width: 100%;
+  min-height: 72px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid #e8e8e8;
+  background: #fafafa;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #333;
+}
+
+.memo-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.memo-btn {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.memo-btn text {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.memo-btn-save {
+  background: #1890ff;
+}
+
+.memo-btn-save text {
+  color: #fff;
+}
+
+.memo-btn-clear {
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+}
+
+.memo-btn-clear text {
+  color: #595959;
+}
+
 .holiday-summary {
   margin-top: 16px;
-  padding: 16px;
+  padding: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+}
+
+.holiday-summary > .summary-card + .summary-card {
+  margin-top: 12px;
+}
+
+.summary-card {
+  padding: 14px 16px 16px;
   border-radius: 12px;
-  background: white;
+  background: #fff;
+  border: 1px solid #ebebeb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.summary-card-accent {
+  padding: 16px 14px;
+  border: 1px solid #95de64;
+  border-left-width: 5px;
+  border-left-color: #389e0d;
+  border-right-width: 5px;
+  border-right-color: #389e0d;
+  background: linear-gradient(145deg, #e8ffea 0%, #f6ffed 42%, #ffffff 100%);
+  box-shadow: 0 4px 18px rgba(56, 158, 13, 0.18), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.next-rest-head {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.next-rest-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: linear-gradient(160deg, #73d13d 0%, #389e0d 100%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  flex-shrink: 0;
+  box-shadow: 0 3px 10px rgba(56, 158, 13, 0.4);
+}
+
+.next-rest-badge text {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.next-rest-heading {
+  margin-left: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #237804;
+  letter-spacing: 0.02em;
+}
+
+.summary-card-plain .summary-no-next-desc {
+  margin-top: 4px;
+}
+
+.next-rest-main {
+  margin-bottom: 12px;
+}
+
+.next-rest-weekday {
+  font-size: 24px;
+  font-weight: 700;
+  color: #141414;
+}
+
+.next-rest-date {
+  font-size: 14px;
+  color: #237804;
+  font-weight: 700;
+}
+
+.next-rest-line {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.next-rest-count {
+  font-size: 22px;
+}
+
+.compare-item-on-accent {
+  background: #fff;
+  border: 1px solid #c8e6c9;
+  box-shadow: 0 1px 2px rgba(56, 158, 13, 0.06);
 }
 
 .summary-title {
+  display: block;
   color: #666;
   font-size: 13px;
   margin-bottom: 8px;
@@ -798,7 +1281,6 @@ onMounted(() => {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
   margin-bottom: 10px;
 }
 
@@ -809,14 +1291,23 @@ onMounted(() => {
 }
 
 .summary-date {
+  margin-left: 12px;
   color: #999;
   font-size: 13px;
 }
 
 .summary-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
   color: #333;
   font-size: 14px;
   line-height: 1.6;
+}
+
+.summary-line text + .summary-count {
+  margin-left: 2px;
+  margin-right: 2px;
 }
 
 .summary-count {
@@ -827,9 +1318,13 @@ onMounted(() => {
 }
 
 .summary-compare {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
   margin-top: 12px;
+}
+
+.summary-compare .compare-item + .compare-item {
+  margin-top: 8px;
 }
 
 .compare-item {
@@ -840,24 +1335,26 @@ onMounted(() => {
   font-size: 13px;
 }
 
+.compare-item text {
+  display: block;
+  font-size: 13px;
+  color: #555;
+}
+
 .summary-note {
-  margin-top: 10px;
+  margin-top: 12px;
+  padding: 0 2px;
   color: #888;
   font-size: 12px;
   line-height: 1.5;
 }
 
-.summary-divider {
-  height: 1px;
-  background: #f0f0f0;
-  margin: 14px 0;
-}
-
 .year-ratio-block {
-  margin-bottom: 4px;
+  margin-bottom: 0;
 }
 
 .year-ratio-title {
+  display: block;
   font-size: 13px;
   font-weight: 600;
   color: #666;
@@ -868,7 +1365,6 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px;
   margin-bottom: 6px;
 }
 
@@ -879,11 +1375,13 @@ onMounted(() => {
 }
 
 .year-ratio-label {
+  margin-left: 6px;
   font-size: 12px;
   color: #999;
 }
 
 .year-ratio-detail {
+  display: block;
   font-size: 13px;
   color: #555;
   line-height: 1.5;
@@ -894,19 +1392,27 @@ onMounted(() => {
 }
 
 .month-workdays-line {
-  padding: 10px 0 6px;
+  padding: 0;
 }
 
 .month-workdays-main {
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
 .month-workdays-title {
+  display: block;
   font-size: 15px;
   font-weight: 700;
   color: #111;
+  margin-bottom: 4px;
+}
+
+.month-workdays-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
 }
 
 .month-workdays-sub {
@@ -914,8 +1420,10 @@ onMounted(() => {
   color: #555;
 }
 
-.summary-no-next {
-  margin-bottom: 4px;
+.month-workdays-remain {
+  color: #fa8c16;
+  font-weight: 600;
+  font-size: 13px;
 }
 
 .summary-no-next-desc {
@@ -952,7 +1460,6 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
   padding: 12px 0;
 }
 
@@ -965,7 +1472,6 @@ onMounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
 .accordion-name {
@@ -975,11 +1481,13 @@ onMounted(() => {
 }
 
 .accordion-dates {
+  margin-top: 4px;
   font-size: 13px;
   color: #999;
 }
 
 .accordion-teaser {
+  margin-top: 4px;
   font-size: 12px;
   color: #1890ff;
 }
@@ -989,6 +1497,7 @@ onMounted(() => {
 }
 
 .accordion-arrow {
+  margin-left: 10px;
   flex-shrink: 0;
   font-size: 12px;
   color: #999;
