@@ -429,6 +429,19 @@ const selectedDayPanel = computed(() => {
 })
 
 const memoDraft = ref('')
+/** 本月备忘录列表默认折叠 */
+const memoListExpanded = ref(false)
+
+function toggleMemoListExpanded() {
+  memoListExpanded.value = !memoListExpanded.value
+}
+
+watch(
+  () => calendarStore.currentDate.format('YYYY-MM'),
+  () => {
+    memoListExpanded.value = false
+  }
+)
 
 watch(
   () => selectedDayPanel.value?.dateStr,
@@ -451,6 +464,26 @@ function clearSelectedMemo() {
   memoDraft.value = ''
   dayMemosStore.setMemo(ds, '')
   uni.showToast({ title: '已清空', icon: 'none', duration: 1200 })
+}
+
+const memoListForCurrentMonth = computed(() => {
+  const ym = calendarStore.currentDate.format('YYYY-MM')
+  return dayMemosStore.memoListSorted.filter(row => row.dateStr.slice(0, 7) === ym)
+})
+
+const memoListCount = computed(() => memoListForCurrentMonth.value.length)
+
+function formatMemoListDateTitle(dateStr: string) {
+  const d = dayjs(dateStr)
+  return `${d.format('M月D日')} ${weekDays[d.day()]}`
+}
+
+function isMemoRowToday(dateStr: string) {
+  return dayjs(dateStr).isSame(dayjs(), 'day')
+}
+
+function openMemoFromList(dateStr: string) {
+  calendarStore.showDayInCalendar(dayjs(dateStr))
 }
 
 const selectedHeadDateText = computed(() =>
@@ -611,6 +644,37 @@ onMounted(() => {
         <view class="memo-actions">
           <view class="memo-btn memo-btn-save" @click="saveSelectedMemo"><text>保存</text></view>
           <view class="memo-btn memo-btn-clear" @click="clearSelectedMemo"><text>清空</text></view>
+        </view>
+      </view>
+    </view>
+
+    <view class="memo-list-card summary-card">
+      <view class="memo-list-head memo-list-head-toggle" @click="toggleMemoListExpanded">
+        <view class="memo-list-head-left">
+          <text class="memo-list-head-title">本月备忘录</text>
+          <text v-if="memoListCount > 0" class="memo-list-summary">共 {{ memoListCount }} 条</text>
+          <text v-else class="memo-list-summary memo-list-summary-muted">本月暂无</text>
+        </view>
+        <text class="memo-list-chevron">{{ memoListExpanded ? '▲' : '▼' }}</text>
+      </view>
+      <view v-show="memoListExpanded" class="memo-list-body">
+        <scroll-view v-if="memoListCount > 0" scroll-y class="memo-list-scroll" enable-flex>
+          <view
+            v-for="row in memoListForCurrentMonth"
+            :key="row.dateStr"
+            class="memo-list-row"
+            :class="{ 'memo-list-row-today': isMemoRowToday(row.dateStr) }"
+            @click="openMemoFromList(row.dateStr)"
+          >
+            <view class="memo-list-row-bar" />
+            <view class="memo-list-row-text">
+              <text class="memo-list-row-date">{{ formatMemoListDateTitle(row.dateStr) }}</text>
+              <text class="memo-list-row-preview">{{ row.text }}</text>
+            </view>
+          </view>
+        </scroll-view>
+        <view v-else class="memo-list-empty-wrap">
+          <text class="memo-list-empty">选中日期后在上方可添加</text>
         </view>
       </view>
     </view>
@@ -1166,6 +1230,125 @@ onMounted(() => {
 
 .memo-btn-clear text {
   color: #595959;
+}
+
+.memo-list-card {
+  margin-top: 16px;
+}
+
+.memo-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memo-list-head-toggle {
+  padding: 4px 0;
+  margin-bottom: 0;
+}
+
+.memo-list-head-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.memo-list-head-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+}
+
+.memo-list-summary {
+  font-size: 12px;
+  color: #8c8c8c;
+  line-height: 1.3;
+}
+
+.memo-list-summary-muted {
+  color: #bfbfbf;
+}
+
+.memo-list-chevron {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #8c8c8c;
+  line-height: 1;
+  padding: 6px 4px;
+}
+
+.memo-list-body {
+  padding-top: 10px;
+}
+
+.memo-list-scroll {
+  max-height: 480rpx;
+}
+
+.memo-list-row {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  padding: 10px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.memo-list-row:last-child {
+  border-bottom: none;
+}
+
+.memo-list-row-bar {
+  width: 4px;
+  border-radius: 2px;
+  background: #1890ff;
+  flex-shrink: 0;
+  margin-right: 10px;
+}
+
+.memo-list-row-today .memo-list-row-bar {
+  background: #52c41a;
+}
+
+.memo-list-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.memo-list-row-date {
+  font-size: 14px;
+  font-weight: 600;
+  color: #262626;
+  margin-bottom: 4px;
+}
+
+.memo-list-row-today .memo-list-row-date {
+  color: #389e0d;
+}
+
+.memo-list-row-preview {
+  font-size: 13px;
+  color: #595959;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+.memo-list-empty-wrap {
+  padding: 12px 0 4px;
+}
+
+.memo-list-empty {
+  font-size: 13px;
+  color: #8c8c8c;
+  line-height: 1.5;
 }
 
 .holiday-summary {

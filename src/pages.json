@@ -13,6 +13,12 @@
       }
     },
     {
+      "path": "pages/memos/index",
+      "style": {
+        "navigationBarTitleText": "备忘录管理"
+      }
+    },
+    {
       "path": "pages/calendar/index",
       "style": {
         "navigationBarTitleText": "日历"

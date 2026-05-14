@@ -70,6 +70,13 @@ export const useCalendarStore = defineStore('calendar', () => {
     selectedDate.value = date
   }
 
+  /** 从列表等入口跳到某日：同步切换月份，保证格子里能选中该天 */
+  function showDayInCalendar(date: dayjs.Dayjs) {
+    const d = date.startOf('day')
+    currentDate.value = d.startOf('month')
+    selectedDate.value = d
+  }
+
   // 是否是当前月份
   function isCurrentMonth(date: dayjs.Dayjs): boolean {
     return date.format('YYYY-MM') === currentMonth.value
@@ -98,6 +105,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     nextMonth,
     goToToday,
     selectDate,
+    showDayInCalendar,
     isCurrentMonth,
     isToday,
     isSelected

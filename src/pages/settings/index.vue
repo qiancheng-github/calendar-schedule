@@ -3,11 +3,18 @@ import { ref, computed, onMounted } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import { useEmployeeStore } from '@/stores/employee'
 import { useWorkSettingsStore, type WorkMode } from '@/stores/workSettings'
+import { useDayMemosStore } from '@/stores/dayMemos'
 import dayjs from 'dayjs'
 
 const scheduleStore = useScheduleStore()
 const employeeStore = useEmployeeStore()
 const workSettingsStore = useWorkSettingsStore()
+const dayMemosStore = useDayMemosStore()
+
+const memoManageSubtitle = computed(() => {
+  const n = dayMemosStore.memoListSorted.length
+  return n > 0 ? `共 ${n} 条 · 查看全部、复制导出` : '查看全部、复制导出'
+})
 
 /** 排班规则、休息日设置：设置页暂不展示，改为 true 可恢复 */
 const showScheduleAdvancedSections = false
@@ -88,10 +95,14 @@ function saveRule() {
   uni.showToast({ title: '保存成功', icon: 'success' })
 }
 
+function goMemosManage() {
+  uni.navigateTo({ url: '/pages/memos/index' })
+}
+
 function clearAllData() {
   uni.showModal({
     title: '确认清空',
-    content: '确定要清空所有排班数据吗？',
+    content: '将清空本地全部数据（日历、排班、备忘录等）。确定继续？',
     success: (res) => {
       if (res.confirm) {
         uni.clearStorageSync()
@@ -105,6 +116,7 @@ onMounted(() => {
   employeeStore.loadFromStorage()
   scheduleStore.loadFromStorage()
   workSettingsStore.loadFromStorage()
+  dayMemosStore.loadFromStorage()
 
   if (employeeStore.currentEmployee) {
     restDays.value = [...employeeStore.currentEmployee.restDays]
@@ -210,6 +222,18 @@ function toggleRestDay(day: number) {
         />
       </view>
     </view>
+
+    <view class="section">
+      <view class="section-title">备忘录</view>
+      <view class="menu-row" @click="goMemosManage">
+        <view class="menu-row-main">
+          <text class="menu-row-title">备忘录管理</text>
+          <text class="menu-row-desc">{{ memoManageSubtitle }}</text>
+        </view>
+        <text class="menu-row-arrow">›</text>
+      </view>
+    </view>
+
     <!-- 当前员工休息日设置 -->
     <view class="section" v-if="showScheduleAdvancedSections">
       <view class="section-title">休息日设置</view>
@@ -355,6 +379,43 @@ function toggleRestDay(day: number) {
   font-weight: 600;
   color: #333;
   margin-bottom: 16px;
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 4px;
+  margin: 0 -4px;
+  border-radius: 8px;
+}
+
+.menu-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.menu-row-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+}
+
+.menu-row-desc {
+  font-size: 12px;
+  color: #8c8c8c;
+  line-height: 1.4;
+}
+
+.menu-row-arrow {
+  flex-shrink: 0;
+  font-size: 22px;
+  color: #bfbfbf;
+  line-height: 1;
 }
 
 .mode-selector {

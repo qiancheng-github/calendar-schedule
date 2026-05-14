@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 const STORAGE_KEY = 'dayMemos'
 
@@ -49,8 +49,20 @@ export const useDayMemosStore = defineStore('dayMemos', () => {
     saveToStorage()
   }
 
+  /** 按日期降序，仅非空备忘，供列表展示 */
+  const memoListSorted = computed(() => {
+    const out: { dateStr: string; text: string }[] = []
+    for (const dateStr of Object.keys(memos.value)) {
+      const t = memos.value[dateStr]
+      if (typeof t === 'string' && t.trim()) out.push({ dateStr, text: t.trim() })
+    }
+    out.sort((a, b) => b.dateStr.localeCompare(a.dateStr))
+    return out
+  })
+
   return {
     memos,
+    memoListSorted,
     loadFromStorage,
     getMemo,
     hasMemo,
